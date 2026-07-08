@@ -18,6 +18,7 @@ TEMP_DIR="/tmp"
 URL="https://raw.githubusercontent.com/Ham-ahmed/245/refs/heads/main/MBotton.tar.gz"
 PACKAGE_PATH="$TEMP_DIR/$PLUGIN_NAME-$VERSION.tar.gz"
 EXTRACT_DIR="$TEMP_DIR/$PLUGIN_NAME-extract"
+LOG_FILE="/tmp/install_$PLUGIN_NAME.log"
 
 # Trap interrupts
 trap 'echo -e "\n${RED}❌ Installation interrupted by user${NC}"; exit 1' INT TERM
@@ -76,45 +77,71 @@ fi
 # Download package
 echo ""
 echo -e "${BLUE}▶ Downloading $PLUGIN_NAME-$VERSION...${NC}"
+echo -e "${BLUE}   URL: $URL${NC}"
 sleep 2
 
 # Clean old temp files
 rm -rf "$EXTRACT_DIR" "$PACKAGE_PATH" 2>/dev/null
 
-# Try download with retry
+# Try download with retry and verbose output
 RETRY_COUNT=0
 MAX_RETRIES=3
+DOWNLOAD_SUCCESS=0
+
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if wget --show-progress -qO "$PACKAGE_PATH" --no-check-certificate --timeout=10 "$URL"; then
+    echo -e "${YELLOW}   Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES${NC}"
+    
+    # Try with different options
+    if wget -O "$PACKAGE_PATH" --no-check-certificate --timeout=15 --tries=2 "$URL" 2>&1 | tee -a "$LOG_FILE"; then
+        DOWNLOAD_SUCCESS=1
         break
     fi
+    
     RETRY_COUNT=$((RETRY_COUNT + 1))
-    echo -e "${YELLOW}⚠️  Download attempt $RETRY_COUNT failed. Retrying...${NC}"
-    sleep 2
+    if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+        echo -e "${YELLOW}⚠️  Download attempt $RETRY_COUNT failed. Retrying in 3 seconds...${NC}"
+        sleep 3
+    fi
 done
 
-if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
     echo -e "${RED}❌ Download failed after $MAX_RETRIES attempts!${NC}"
-    echo -e "${YELLOW}   Please check your internet connection and try again.${NC}"
+    echo -e "${YELLOW}   Check if the URL is accessible:${NC}"
+    echo -e "${YELLOW}   $URL${NC}"
+    echo -e "${YELLOW}   Check your internet connection.${NC}"
+    echo -e "${YELLOW}   Log file: $LOG_FILE${NC}"
     exit 1
 fi
 
 if [ ! -s "$PACKAGE_PATH" ]; then
     echo -e "${RED}❌ Downloaded file is empty or corrupted${NC}"
+    echo -e "${YELLOW}   File size: $(wc -c < "$PACKAGE_PATH") bytes${NC}"
     rm -f "$PACKAGE_PATH"
     exit 1
 fi
 
-echo -e "${GREEN}✓ Download completed (Size: $(du -h "$PACKAGE_PATH" | cut -f1))${NC}"
+# Show file info
+FILE_SIZE=$(du -h "$PACKAGE_PATH" | cut -f1)
+echo -e "${GREEN}✓ Download completed (Size: $FILE_SIZE)${NC}"
+echo -e "${YELLOW}   File path: $PACKAGE_PATH${NC}"
+
+# Check file type
+echo -e "${YELLOW}▶ Checking file type...${NC}"
+FILE_TYPE=$(file "$PACKAGE_PATH" 2>/dev/null)
+echo -e "${BLUE}   $FILE_TYPE${NC}"
 
 # Create extraction directory
 mkdir -p "$EXTRACT_DIR"
 
-# Extract package and find the actual plugin directory
+# Extract package
 echo -e "${YELLOW}▶ Extracting package...${NC}"
-if ! tar -xzf "$PACKAGE_PATH" -C "$EXTRACT_DIR" 2>&1; then
-    echo -e "${RED}❌ Extraction failed${NC}"
-    echo -e "${YELLOW}   File content preview:${NC}"
+EXTRACT_OUTPUT=$(tar -xzvf "$PACKAGE_PATH" -C "$EXTRACT_DIR" 2>&1)
+EXTRACT_STATUS=$?
+
+if [ $EXTRACT_STATUS -ne 0 ]; then
+    echo -e "${RED}❌ Extraction failed with error:${NC}"
+    echo "$EXTRACT_OUTPUT"
+    echo -e "${YELLOW}   Trying to list archive contents:${NC}"
     tar -tzf "$PACKAGE_PATH" 2>&1 | head -20
     rm -rf "$PACKAGE_PATH" "$EXTRACT_DIR"
     exit 1
@@ -122,40 +149,49 @@ fi
 
 echo -e "${GREEN}✓ Extraction completed${NC}"
 
-# Show what was extracted
-echo -e "${YELLOW}▶ Contents of extracted archive:${NC}"
+# Show extracted contents
+echo -e "${YELLOW}▶ Extracted contents:${NC}"
 ls -la "$EXTRACT_DIR" 2>/dev/null
+echo ""
+
+# Show all files extracted
+echo -e "${YELLOW}▶ All extracted files:${NC}"
+find "$EXTRACT_DIR" -type f -name "*.py" -o -name "*.xml" -o -name "*.png" 2>/dev/null | head -20
 
 # Find the actual plugin directory
 PLUGIN_SOURCE=""
+echo -e "${YELLOW}▶ Searching for plugin directory...${NC}"
+
+# Try different possible locations
 if [ -d "$EXTRACT_DIR/$PLUGIN_NAME" ]; then
     PLUGIN_SOURCE="$EXTRACT_DIR/$PLUGIN_NAME"
+    echo -e "${GREEN}   Found: $PLUGIN_SOURCE${NC}"
 elif [ -d "$EXTRACT_DIR" ] && [ -f "$EXTRACT_DIR/plugin.py" ]; then
     PLUGIN_SOURCE="$EXTRACT_DIR"
+    echo -e "${GREEN}   Found: $PLUGIN_SOURCE (plugin.py in root)${NC}"
 else
-    # Try to find any directory that might be the plugin
-    PLUGIN_FOUND=$(find "$EXTRACT_DIR" -maxdepth 2 -type d -name "MBotton" -o -name "MBotton-*" 2>/dev/null | head -1)
-    if [ -n "$PLUGIN_FOUND" ] && [ -d "$PLUGIN_FOUND" ]; then
-        PLUGIN_SOURCE="$PLUGIN_FOUND"
-    elif [ -d "$EXTRACT_DIR" ]; then
-        # Check if there's a subdirectory with plugin.py
-        SUBDIR=$(find "$EXTRACT_DIR" -maxdepth 2 -name "plugin.py" -exec dirname {} \; 2>/dev/null | head -1)
-        if [ -n "$SUBDIR" ] && [ -d "$SUBDIR" ]; then
-            PLUGIN_SOURCE="$SUBDIR"
-        else
-            # Use the first directory found
-            FIRST_DIR=$(find "$EXTRACT_DIR" -maxdepth 1 -type d ! -path "$EXTRACT_DIR" 2>/dev/null | head -1)
-            if [ -n "$FIRST_DIR" ]; then
-                PLUGIN_SOURCE="$FIRST_DIR"
+    # Search for plugin.py anywhere
+    PLUGIN_PY=$(find "$EXTRACT_DIR" -name "plugin.py" 2>/dev/null | head -1)
+    if [ -n "$PLUGIN_PY" ]; then
+        PLUGIN_SOURCE=$(dirname "$PLUGIN_PY")
+        echo -e "${GREEN}   Found plugin.py at: $PLUGIN_SOURCE${NC}"
+    else
+        # Search for any directory that might contain plugin files
+        POSSIBLE_DIRS=$(find "$EXTRACT_DIR" -maxdepth 2 -type d ! -path "$EXTRACT_DIR" 2>/dev/null)
+        for DIR in $POSSIBLE_DIRS; do
+            if [ -f "$DIR/__init__.py" ] || [ -f "$DIR/plugin.py" ] || [ -f "$DIR/*.py" ]; then
+                PLUGIN_SOURCE="$DIR"
+                echo -e "${GREEN}   Found possible plugin at: $PLUGIN_SOURCE${NC}"
+                break
             fi
-        fi
+        done
     fi
 fi
 
 if [ -z "$PLUGIN_SOURCE" ] || [ ! -d "$PLUGIN_SOURCE" ]; then
     echo -e "${RED}❌ Could not find plugin directory in the archive${NC}"
-    echo -e "${YELLOW}   Archive contents:${NC}"
-    tar -tzf "$PACKAGE_PATH" 2>&1 | head -30
+    echo -e "${YELLOW}   All contents:${NC}"
+    find "$EXTRACT_DIR" -type f 2>/dev/null | head -20
     rm -rf "$PACKAGE_PATH" "$EXTRACT_DIR"
     exit 1
 fi
@@ -170,6 +206,9 @@ mkdir -p "$INSTALL_DIR"
 rm -rf "$INSTALL_DIR/$PLUGIN_NAME" 2>/dev/null
 
 # Copy the plugin
+echo -e "${BLUE}   Copying from: $PLUGIN_SOURCE${NC}"
+echo -e "${BLUE}   Copying to: $INSTALL_DIR/$PLUGIN_NAME${NC}"
+
 if ! cp -rf "$PLUGIN_SOURCE" "$INSTALL_DIR/$PLUGIN_NAME" 2>&1; then
     echo -e "${RED}❌ Failed to copy plugin${NC}"
     rm -rf "$PACKAGE_PATH" "$EXTRACT_DIR"
@@ -183,11 +222,16 @@ if [ ! -d "$INSTALL_DIR/$PLUGIN_NAME" ]; then
     exit 1
 fi
 
+# Check installed files
+echo -e "${YELLOW}▶ Installed files:${NC}"
+ls -la "$INSTALL_DIR/$PLUGIN_NAME" 2>/dev/null
+
 # Check if plugin.py exists
-if [ ! -f "$INSTALL_DIR/$PLUGIN_NAME/plugin.py" ]; then
+if [ -f "$INSTALL_DIR/$PLUGIN_NAME/plugin.py" ]; then
+    echo -e "${GREEN}✓ plugin.py found${NC}"
+else
     echo -e "${YELLOW}⚠️  Warning: plugin.py not found in the installed directory${NC}"
-    echo -e "${YELLOW}   Installed files:${NC}"
-    ls -la "$INSTALL_DIR/$PLUGIN_NAME"
+    echo -e "${YELLOW}   This might be normal if the plugin structure is different.${NC}"
 fi
 
 # Clean up
@@ -200,6 +244,9 @@ echo "#                     $PLUGIN_NAME                     #"
 echo "#           Enigma2 restart is required                 #"
 echo "#########################################################"
 echo -e "${NC}"
+
+# Show plugin location
+echo -e "${BLUE}ℹ️  Plugin installed at: $INSTALL_DIR/$PLUGIN_NAME${NC}"
 
 # Automatic restart after 3 seconds
 echo -e "${YELLOW}▶ Restarting Enigma2 in 3 seconds...${NC}"
@@ -245,4 +292,6 @@ else
 fi
 
 echo ""
+echo -e "${GREEN}✓ Installation script completed successfully!${NC}"
+echo -e "${BLUE}ℹ️  Log file saved at: $LOG_FILE${NC}"
 echo -e "${CYAN}Script execution completed${NC}"
