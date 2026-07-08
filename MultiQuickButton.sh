@@ -50,8 +50,8 @@ if [ "$(id -u)" != "0" ]; then
     exit 1
 fi
 
-# Check for wget
-if ! command -v wget >/dev/null 2>&1; then
+# Check for wget using 'which' instead of 'command'
+if ! which wget >/dev/null 2>&1; then
     echo -e "${RED}❌ wget not found. Please install wget first.${NC}"
     echo -e "${YELLOW}Try: opkg install wget${NC}"
     exit 1
@@ -101,12 +101,16 @@ if [ ! -s "$PACKAGE_PATH" ]; then
     exit 1
 fi
 
-# Verify file type with more robust check
-if ! file "$PACKAGE_PATH" 2>/dev/null | grep -qE "gzip compressed data|tar archive"; then
-    echo -e "${RED}❌ Downloaded file is not a valid archive${NC}"
-    echo -e "${YELLOW}   File type: $(file "$PACKAGE_PATH")${NC}"
-    rm -f "$PACKAGE_PATH"
-    exit 1
+# Verify file type using 'file' command if available
+if command -v file >/dev/null 2>&1; then
+    if ! file "$PACKAGE_PATH" 2>/dev/null | grep -qE "gzip compressed data|tar archive"; then
+        echo -e "${RED}❌ Downloaded file is not a valid archive${NC}"
+        echo -e "${YELLOW}   File type: $(file "$PACKAGE_PATH")${NC}"
+        rm -f "$PACKAGE_PATH"
+        exit 1
+    fi
+else
+    echo -e "${YELLOW}⚠️  'file' command not found. Skipping file verification...${NC}"
 fi
 
 echo -e "${GREEN}✓ Download completed${NC}"
