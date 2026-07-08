@@ -68,28 +68,11 @@ fi
 # Check if plugin already exists
 if [ -d "$INSTALL_DIR/$PLUGIN_NAME" ]; then
     echo -e "${YELLOW}⚠️  Plugin already exists at: $INSTALL_DIR/$PLUGIN_NAME${NC}"
-    echo -e "${YELLOW}   Do you want to overwrite? (y/n): ${NC}"
-    read -r OVERWRITE
-    if [ "$OVERWRITE" != "y" ] && [ "$OVERWRITE" != "Y" ]; then
-        echo -e "${BLUE}ℹ️  Installation cancelled${NC}"
-        exit 0
-    fi
     echo -e "${YELLOW}   Removing old version...${NC}"
     rm -rf "$INSTALL_DIR/$PLUGIN_NAME"
 fi
 
-# Ask for confirmation
-echo -e "${YELLOW}⚠️  This script will install $PLUGIN_NAME plugin."
-echo -e "   Device will need to restart after installation."
-echo -e "   Continue? (y/n): ${NC}"
-read -r CONFIRM
-
-if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
-    echo -e "${RED}❌ Installation cancelled by user${NC}"
-    exit 0
-fi
-
-# Download package
+# Download package (Direct download without confirmation)
 echo ""
 echo -e "${BLUE}▶ Downloading $PLUGIN_NAME-$VERSION...${NC}"
 sleep 2
