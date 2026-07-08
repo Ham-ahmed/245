@@ -201,51 +201,47 @@ echo "#           Enigma2 restart is required                 #"
 echo "#########################################################"
 echo -e "${NC}"
 
-echo -e "${YELLOW}▶ Restart Enigma2 now? (y/n): ${NC}"
-read -r RESTART_CONFIRM
+# Automatic restart after 3 seconds
+echo -e "${YELLOW}▶ Restarting Enigma2 in 3 seconds...${NC}"
+echo -e "${YELLOW}   Press Ctrl+C to cancel${NC}"
+sleep 3
 
-if [ "$RESTART_CONFIRM" = "y" ] || [ "$RESTART_CONFIRM" = "Y" ]; then
-    echo -e "${RED}▶ Restarting Enigma2...${NC}"
-    sleep 2
+echo -e "${RED}▶ Restarting Enigma2...${NC}"
+
+if pidof enigma2 >/dev/null; then
+    echo "Stopping Enigma2 gracefully..."
+    killall -15 enigma2 2>/dev/null
+    sleep 3
     
     if pidof enigma2 >/dev/null; then
-        echo "Stopping Enigma2 gracefully..."
-        killall -15 enigma2 2>/dev/null
-        sleep 3
-        
-        if pidof enigma2 >/dev/null; then
-            echo "Force stopping Enigma2..."
-            killall -9 enigma2 2>/dev/null
-            sleep 2
-        fi
-        
-        echo "Starting Enigma2..."
-        if [ -f /usr/bin/enigma2 ]; then
-            /usr/bin/enigma2 &
-            echo -e "${GREEN}✓ Enigma2 restarted successfully${NC}"
-        elif [ -f /usr/local/bin/enigma2 ]; then
-            /usr/local/bin/enigma2 &
-            echo -e "${GREEN}✓ Enigma2 restarted successfully${NC}"
-        else
-            echo -e "${YELLOW}⚠️  Enigma2 binary not found. Please restart manually.${NC}"
-            echo -e "${YELLOW}   Try: init 4 && init 3${NC}"
-        fi
+        echo "Force stopping Enigma2..."
+        killall -9 enigma2 2>/dev/null
+        sleep 2
+    fi
+    
+    echo "Starting Enigma2..."
+    if [ -f /usr/bin/enigma2 ]; then
+        /usr/bin/enigma2 &
+        echo -e "${GREEN}✓ Enigma2 restarted successfully${NC}"
+    elif [ -f /usr/local/bin/enigma2 ]; then
+        /usr/local/bin/enigma2 &
+        echo -e "${GREEN}✓ Enigma2 restarted successfully${NC}"
     else
-        echo "Starting Enigma2..."
-        if [ -f /usr/bin/enigma2 ]; then
-            /usr/bin/enigma2 &
-            echo -e "${GREEN}✓ Enigma2 started successfully${NC}"
-        elif [ -f /usr/local/bin/enigma2 ]; then
-            /usr/local/bin/enigma2 &
-            echo -e "${GREEN}✓ Enigma2 started successfully${NC}"
-        else
-            echo -e "${YELLOW}⚠️  Enigma2 binary not found. Please restart manually.${NC}"
-            echo -e "${YELLOW}   Try: init 4 && init 3${NC}"
-        fi
+        echo -e "${YELLOW}⚠️  Enigma2 binary not found. Please restart manually.${NC}"
+        echo -e "${YELLOW}   Try: init 4 && init 3${NC}"
     fi
 else
-    echo -e "${GREEN}✓ Installation complete. Restart Enigma2 manually when ready.${NC}"
-    echo -e "${YELLOW}   To restart: init 4 && init 3${NC}"
+    echo "Starting Enigma2..."
+    if [ -f /usr/bin/enigma2 ]; then
+        /usr/bin/enigma2 &
+        echo -e "${GREEN}✓ Enigma2 started successfully${NC}"
+    elif [ -f /usr/local/bin/enigma2 ]; then
+        /usr/local/bin/enigma2 &
+        echo -e "${GREEN}✓ Enigma2 started successfully${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Enigma2 binary not found. Please restart manually.${NC}"
+        echo -e "${YELLOW}   Try: init 4 && init 3${NC}"
+    fi
 fi
 
 echo ""
