@@ -17,6 +17,7 @@ INSTALL_DIR="/usr/lib/enigma2/python/Plugins/Extensions"
 TEMP_DIR="/tmp"
 URL="https://raw.githubusercontent.com/Ham-ahmed/245/refs/heads/main/MBotton.tar.gz"
 PACKAGE_PATH="$TEMP_DIR/$PLUGIN_NAME-$VERSION.tar.gz"
+EXTRACT_DIR="$TEMP_DIR/$PLUGIN_NAME-extract"
 
 # Trap interrupts
 trap 'echo -e "\n${RED}❌ Installation interrupted by user${NC}"; exit 1' INT TERM
@@ -50,7 +51,7 @@ if [ "$(id -u)" != "0" ]; then
     exit 1
 fi
 
-# Check for wget using 'which' instead of 'command'
+# Check for wget
 if ! which wget >/dev/null 2>&1; then
     echo -e "${RED}❌ wget not found. Please install wget first.${NC}"
     echo -e "${YELLOW}Try: opkg install wget${NC}"
@@ -72,10 +73,13 @@ if [ -d "$INSTALL_DIR/$PLUGIN_NAME" ]; then
     rm -rf "$INSTALL_DIR/$PLUGIN_NAME"
 fi
 
-# Download package (Direct download without confirmation)
+# Download package
 echo ""
 echo -e "${BLUE}▶ Downloading $PLUGIN_NAME-$VERSION...${NC}"
 sleep 2
+
+# Clean old temp files
+rm -rf "$EXTRACT_DIR" "$PACKAGE_PATH" 2>/dev/null
 
 # Try download with retry
 RETRY_COUNT=0
@@ -101,43 +105,93 @@ if [ ! -s "$PACKAGE_PATH" ]; then
     exit 1
 fi
 
-# Verify file type using 'file' command if available
-if command -v file >/dev/null 2>&1; then
-    if ! file "$PACKAGE_PATH" 2>/dev/null | grep -qE "gzip compressed data|tar archive"; then
-        echo -e "${RED}❌ Downloaded file is not a valid archive${NC}"
-        echo -e "${YELLOW}   File type: $(file "$PACKAGE_PATH")${NC}"
-        rm -f "$PACKAGE_PATH"
-        exit 1
-    fi
-else
-    echo -e "${YELLOW}⚠️  'file' command not found. Skipping file verification...${NC}"
+echo -e "${GREEN}✓ Download completed (Size: $(du -h "$PACKAGE_PATH" | cut -f1))${NC}"
+
+# Create extraction directory
+mkdir -p "$EXTRACT_DIR"
+
+# Extract package and find the actual plugin directory
+echo -e "${YELLOW}▶ Extracting package...${NC}"
+if ! tar -xzf "$PACKAGE_PATH" -C "$EXTRACT_DIR" 2>&1; then
+    echo -e "${RED}❌ Extraction failed${NC}"
+    echo -e "${YELLOW}   File content preview:${NC}"
+    tar -tzf "$PACKAGE_PATH" 2>&1 | head -20
+    rm -rf "$PACKAGE_PATH" "$EXTRACT_DIR"
+    exit 1
 fi
 
-echo -e "${GREEN}✓ Download completed${NC}"
+echo -e "${GREEN}✓ Extraction completed${NC}"
 
-# Create installation directory
+# Show what was extracted
+echo -e "${YELLOW}▶ Contents of extracted archive:${NC}"
+ls -la "$EXTRACT_DIR" 2>/dev/null
+
+# Find the actual plugin directory
+PLUGIN_SOURCE=""
+if [ -d "$EXTRACT_DIR/$PLUGIN_NAME" ]; then
+    PLUGIN_SOURCE="$EXTRACT_DIR/$PLUGIN_NAME"
+elif [ -d "$EXTRACT_DIR" ] && [ -f "$EXTRACT_DIR/plugin.py" ]; then
+    PLUGIN_SOURCE="$EXTRACT_DIR"
+else
+    # Try to find any directory that might be the plugin
+    PLUGIN_FOUND=$(find "$EXTRACT_DIR" -maxdepth 2 -type d -name "MBotton" -o -name "MBotton-*" 2>/dev/null | head -1)
+    if [ -n "$PLUGIN_FOUND" ] && [ -d "$PLUGIN_FOUND" ]; then
+        PLUGIN_SOURCE="$PLUGIN_FOUND"
+    elif [ -d "$EXTRACT_DIR" ]; then
+        # Check if there's a subdirectory with plugin.py
+        SUBDIR=$(find "$EXTRACT_DIR" -maxdepth 2 -name "plugin.py" -exec dirname {} \; 2>/dev/null | head -1)
+        if [ -n "$SUBDIR" ] && [ -d "$SUBDIR" ]; then
+            PLUGIN_SOURCE="$SUBDIR"
+        else
+            # Use the first directory found
+            FIRST_DIR=$(find "$EXTRACT_DIR" -maxdepth 1 -type d ! -path "$EXTRACT_DIR" 2>/dev/null | head -1)
+            if [ -n "$FIRST_DIR" ]; then
+                PLUGIN_SOURCE="$FIRST_DIR"
+            fi
+        fi
+    fi
+fi
+
+if [ -z "$PLUGIN_SOURCE" ] || [ ! -d "$PLUGIN_SOURCE" ]; then
+    echo -e "${RED}❌ Could not find plugin directory in the archive${NC}"
+    echo -e "${YELLOW}   Archive contents:${NC}"
+    tar -tzf "$PACKAGE_PATH" 2>&1 | head -30
+    rm -rf "$PACKAGE_PATH" "$EXTRACT_DIR"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Found plugin at: $PLUGIN_SOURCE${NC}"
+
+# Copy plugin to installation directory
+echo -e "${YELLOW}▶ Installing plugin to $INSTALL_DIR...${NC}"
 mkdir -p "$INSTALL_DIR"
 
-# Extract package with verification
-echo -e "${YELLOW}▶ Extracting package...${NC}"
-if ! tar -xzf "$PACKAGE_PATH" -C "$INSTALL_DIR" 2>&1; then
-    echo -e "${RED}❌ Extraction failed${NC}"
-    echo -e "${YELLOW}   Trying to extract with verbose output:${NC}"
-    tar -xzvf "$PACKAGE_PATH" -C "$INSTALL_DIR" 2>&1 || true
-    rm -f "$PACKAGE_PATH"
+# Remove old installation
+rm -rf "$INSTALL_DIR/$PLUGIN_NAME" 2>/dev/null
+
+# Copy the plugin
+if ! cp -rf "$PLUGIN_SOURCE" "$INSTALL_DIR/$PLUGIN_NAME" 2>&1; then
+    echo -e "${RED}❌ Failed to copy plugin${NC}"
+    rm -rf "$PACKAGE_PATH" "$EXTRACT_DIR"
     exit 1
 fi
 
-# Verify extraction
+# Verify installation
 if [ ! -d "$INSTALL_DIR/$PLUGIN_NAME" ]; then
     echo -e "${RED}❌ Installation failed - Plugin directory not found${NC}"
-    rm -f "$PACKAGE_PATH"
+    rm -rf "$PACKAGE_PATH" "$EXTRACT_DIR"
     exit 1
+fi
+
+# Check if plugin.py exists
+if [ ! -f "$INSTALL_DIR/$PLUGIN_NAME/plugin.py" ]; then
+    echo -e "${YELLOW}⚠️  Warning: plugin.py not found in the installed directory${NC}"
+    echo -e "${YELLOW}   Installed files:${NC}"
+    ls -la "$INSTALL_DIR/$PLUGIN_NAME"
 fi
 
 # Clean up
-rm -f "$PACKAGE_PATH"
-rm -f /tmp/*.ipk /tmp/*.tar.gz 2>/dev/null
+rm -rf "$PACKAGE_PATH" "$EXTRACT_DIR"
 
 echo -e "${GREEN}"
 echo "#########################################################"
